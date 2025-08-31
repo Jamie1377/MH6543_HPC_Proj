@@ -1,0 +1,9 @@
+numpy
+pandas
+xgboost
+scikit-learn
+matplotlib
+seaborn
+tqdm
+yfinance
+ta==0.11.0
