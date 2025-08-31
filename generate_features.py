@@ -86,7 +86,8 @@ def calculate_features(df):
     df['Month'] = df.index.month
     df['Year'] = df.index.year
     
-    # Drop NaN values
+    # Replace inf/-inf with NaN, then drop NaN values
+    df = df.replace([np.inf, -np.inf], np.nan)
     df = df.dropna()
     
     return df
