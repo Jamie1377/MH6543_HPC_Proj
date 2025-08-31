@@ -7,4 +7,5 @@ seaborn
 tqdm
 yfinance
 ta==0.11.0
-lxml 
+lxml
+TA-Lib
