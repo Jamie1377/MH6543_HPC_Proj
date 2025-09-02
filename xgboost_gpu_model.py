@@ -1,8 +1,8 @@
 import pandas as pd
 import numpy as np
 import xgboost as xgb
-from sklearn.model_selection import train_test_split
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
+from sklearn.model_selection import train_test_split, GridSearchCV
+from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, make_scorer
 import time
 import matplotlib.pyplot as plt
 import seaborn as sns
@@ -43,19 +43,90 @@ def prepare_data(df):
     
     return X_train, X_test, y_train, y_test, feature_columns
 
-def train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=True):
-    """Train XGBoost model with GPU acceleration if available"""
-    # Set up parameters
-    params = {
-        'objective': 'binary:logistic',
-        'eval_metric': 'logloss',
-        'max_depth': 6,
-        'eta': 0.1,
-        'subsample': 0.8,
-        'colsample_bytree': 0.8,
-        'min_child_weight': 1,
-        'scale_pos_weight': 1,
+def tune_hyperparameters(X_train, y_train, use_gpu=True):
+    """Tune hyperparameters for the XGBoost model"""
+    print(f"Starting hyperparameter tuning for {'GPU' if use_gpu else 'CPU'} model...")
+    start_time = time.time()
+    
+    # Clean data for hyperparameter tuning
+    X_train_clean = X_train[np.isfinite(X_train.values).all(axis=1)]
+    y_train_clean = y_train[np.isfinite(X_train.values).all(axis=1)]
+    
+    # Create parameter grid for tuning
+    param_grid = {
+        'max_depth': [3, 6, 9],
+        'learning_rate': [0.01, 0.1, 0.2],
+        'n_estimators': [50, 100, 200],
+        'subsample': [0.6, 0.8, 1.0],
+        'colsample_bytree': [0.6, 0.8, 1.0],
+        'min_child_weight': [1, 3, 5],
+        'gamma': [0, 0.1, 0.2]
     }
+    
+    # Create the XGBoost classifier
+    xgb_model = xgb.XGBClassifier(
+        objective='binary:logistic',
+        tree_method='gpu_hist' if use_gpu else 'hist',
+        gpu_id=0 if use_gpu else None,
+        use_label_encoder=False,
+        eval_metric='logloss'
+    )
+    
+    # Use F1 score as the scoring metric
+    f1_scorer = make_scorer(f1_score)
+    
+    # Set up GridSearchCV
+    grid_search = GridSearchCV(
+        estimator=xgb_model,
+        param_grid=param_grid,
+        scoring=f1_scorer,
+        cv=3,
+        n_jobs=-1 if not use_gpu else 1,  # Use 1 job for GPU to avoid memory issues
+        verbose=1
+    )
+    
+    # Fit the grid search
+    grid_search.fit(X_train_clean, y_train_clean)
+    
+    # Get the best parameters
+    best_params = grid_search.best_params_
+    print(f"Best parameters found: {best_params}")
+    print(f"Best F1 score: {grid_search.best_score_:.4f}")
+    
+    end_time = time.time()
+    print(f"Hyperparameter tuning completed in {end_time - start_time:.2f} seconds")
+    
+    # Return the best parameters
+    return best_params
+
+def train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=True, best_params=None):
+    """Train XGBoost model with GPU acceleration if available and with tuned parameters if provided"""
+    # Set up parameters
+    if best_params is None:
+        params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss',
+            'max_depth': 6,
+            'eta': 0.1,
+            'subsample': 0.8,
+            'colsample_bytree': 0.8,
+            'min_child_weight': 1,
+            'scale_pos_weight': 1,
+        }
+    else:
+        # Convert GridSearchCV parameters to XGBoost params format
+        params = {
+            'objective': 'binary:logistic',
+            'eval_metric': 'logloss',
+            'max_depth': best_params.get('max_depth', 6),
+            'eta': best_params.get('learning_rate', 0.1),
+            'subsample': best_params.get('subsample', 0.8),
+            'colsample_bytree': best_params.get('colsample_bytree', 0.8),
+            'min_child_weight': best_params.get('min_child_weight', 1),
+            'gamma': best_params.get('gamma', 0),
+        }
+        print(f"Using tuned parameters: {params}")
+        print(f"Number of boosting rounds: {best_params.get('n_estimators', 100)}")
     
     if use_gpu:
         # Add GPU parameters
@@ -89,11 +160,11 @@ def train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=True):
     # Train model and measure time
     start_time = time.time()
     
-    # Train for 100 rounds
+    # Train with the specified number of rounds or default to 100
     model = xgb.train(
         params,
         dtrain,
-        num_boost_round=100,
+        num_boost_round=best_params.get('n_estimators', 100) if best_params else 100,
         evals=[(dtrain, 'train'), (dtest, 'test')],
         early_stopping_rounds=10,
         verbose_eval=10
@@ -151,13 +222,21 @@ def main():
     # Prepare data
     X_train, X_test, y_train, y_test, feature_columns = prepare_data(df)
     
-    # Train with GPU
-    print("\n--- Training with GPU ---")
-    model_gpu, time_gpu = train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=True)
+    # Tune hyperparameters for GPU
+    print("\n--- Hyperparameter Tuning for GPU Model ---")
+    best_params_gpu = tune_hyperparameters(X_train, y_train, use_gpu=True)
     
-    # Train with CPU for comparison
-    print("\n--- Training with CPU ---")
-    model_cpu, time_cpu = train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=False)
+    # Tune hyperparameters for CPU (for comparison)
+    print("\n--- Hyperparameter Tuning for CPU Model ---")
+    best_params_cpu = tune_hyperparameters(X_train, y_train, use_gpu=False)
+    
+    # Train with GPU using tuned parameters
+    print("\n--- Training with GPU using tuned parameters ---")
+    model_gpu, time_gpu = train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=True, best_params=best_params_gpu)
+    
+    # Train with CPU for comparison using tuned parameters
+    print("\n--- Training with CPU using tuned parameters ---")
+    model_cpu, time_cpu = train_model_with_gpu(X_train, y_train, X_test, y_test, use_gpu=False, best_params=best_params_cpu)
     
     # Print speedup
     speedup = time_cpu / time_gpu
@@ -166,9 +245,21 @@ def main():
     # Plot feature importance
     plot_feature_importance(model_gpu, feature_columns)
     
-    # Save the model
-    model_gpu.save_model('stock_prediction_model.json')
-    print("Model saved as 'stock_prediction_model.json'")
+    # Save the models
+    model_gpu.save_model('stock_prediction_model_gpu.json')
+    print("GPU model saved as 'stock_prediction_model_gpu.json'")
+    
+    model_cpu.save_model('stock_prediction_model_cpu_from_gpu_script.json')
+    print("CPU model saved as 'stock_prediction_model_cpu_from_gpu_script.json'")
+    
+    # Save best parameters to files for future reference
+    with open('best_params_gpu.txt', 'w') as f:
+        f.write(str(best_params_gpu))
+    print("Best GPU parameters saved to 'best_params_gpu.txt'")
+    
+    with open('best_params_cpu_from_gpu_script.txt', 'w') as f:
+        f.write(str(best_params_cpu))
+    print("Best CPU parameters saved to 'best_params_cpu_from_gpu_script.txt'")
 
 if __name__ == "__main__":
     main()
