@@ -22,14 +22,14 @@ def check_gpu_availability():
         test_data = np.random.rand(10, 5)
         test_labels = np.random.randint(0, 2, 10)
         dtrain = xgb.DMatrix(test_data, label=test_labels)
-        
+
         # Try to train a simple model with GPU
         params = {
-            'tree_method': 'gpu_hist',
-            'gpu_id': 0,
-            'objective': 'binary:logistic'
+            "tree_method": "gpu_hist",
+            "gpu_id": 0,
+            "objective": "binary:logistic",
         }
-        
+
         model = xgb.train(params, dtrain, num_boost_round=1, verbose_eval=False)
         print("✓ GPU is available and working for XGBoost")
         return True
@@ -96,7 +96,7 @@ def tune_hyperparameters(X_train, y_train, use_gpu=True, gpu_available=True):
     if use_gpu and not gpu_available:
         print("GPU requested but not available, falling back to CPU")
         use_gpu = False
-        
+
     print(f"Starting hyperparameter tuning for {'GPU' if use_gpu else 'CPU'} model...")
     start_time = time.time()
 
@@ -192,7 +192,7 @@ def train_model_with_gpu(
     if use_gpu and not gpu_available:
         print("GPU requested but not available, falling back to CPU")
         use_gpu = False
-        
+
     # Set up parameters
     if best_params is None:
         params = {
@@ -232,12 +232,12 @@ def train_model_with_gpu(
     # Remove inf/-inf and very large values from X_train/X_test
     X_train_mask = np.isfinite(X_train.values).all(axis=1)
     X_test_mask = np.isfinite(X_test.values).all(axis=1)
-    
+
     if not np.all(X_train_mask):
         print(f"Removed {np.sum(~X_train_mask)} rows with inf/-inf or NaN from X_train")
     if not np.all(X_test_mask):
         print(f"Removed {np.sum(~X_test_mask)} rows with inf/-inf or NaN from X_test")
-    
+
     X_train_clean = X_train[X_train_mask]
     y_train_clean = y_train[X_train_mask]
     X_test_clean = X_test[X_test_mask]
@@ -259,7 +259,9 @@ def train_model_with_gpu(
         model = xgb.train(
             params,
             dtrain,
-            num_boost_round=best_params.get("n_estimators", 100) if best_params else 100,
+            num_boost_round=(
+                best_params.get("n_estimators", 100) if best_params else 100
+            ),
             evals=[(dtrain, "train"), (dtest, "test")],
             early_stopping_rounds=10,
             verbose_eval=10,
@@ -275,7 +277,9 @@ def train_model_with_gpu(
             model = xgb.train(
                 params,
                 dtrain,
-                num_boost_round=best_params.get("n_estimators", 100) if best_params else 100,
+                num_boost_round=(
+                    best_params.get("n_estimators", 100) if best_params else 100
+                ),
                 evals=[(dtrain, "train"), (dtest, "test")],
                 early_stopping_rounds=10,
                 verbose_eval=10,
@@ -312,19 +316,24 @@ def plot_feature_importance(model, feature_names, model_name="XGBoost"):
     try:
         # Get feature importance
         importance = model.get_score(importance_type="gain")
-        
+
         if not importance:
             print("No feature importance data available")
             return
-            
+
         importance = {
             k: v
-            for k, v in sorted(importance.items(), key=lambda item: item[1], reverse=True)
+            for k, v in sorted(
+                importance.items(), key=lambda item: item[1], reverse=True
+            )
         }
 
         # Convert to DataFrame for plotting
         importance_df = pd.DataFrame(
-            {"Feature": list(importance.keys()), "Importance": list(importance.values())}
+            {
+                "Feature": list(importance.keys()),
+                "Importance": list(importance.values()),
+            }
         )
 
         # Take top 20 features
@@ -337,12 +346,12 @@ def plot_feature_importance(model, feature_names, model_name="XGBoost"):
         plt.xlabel("Importance (Gain)")
         plt.ylabel("Features")
         plt.tight_layout()
-        
+
         filename = f"feature_importance_{model_name.lower().replace(' ', '_')}.png"
-        plt.savefig(filename, dpi=300, bbox_inches='tight')
+        plt.savefig(filename, dpi=300, bbox_inches="tight")
         print(f"Feature importance plot saved as '{filename}'")
         plt.close()  # Close the figure to free memory
-        
+
     except Exception as e:
         print(f"Error plotting feature importance: {e}")
 
@@ -350,7 +359,7 @@ def plot_feature_importance(model, feature_names, model_name="XGBoost"):
 def main():
     # Check GPU availability first
     gpu_available = check_gpu_availability()
-    
+
     # Load the dataset
     df = load_data()
 
@@ -377,8 +386,13 @@ def main():
             # Train with GPU using tuned parameters
             print("\n--- Training with GPU using tuned parameters ---")
             model_gpu, time_gpu, gpu_actually_used = train_model_with_gpu(
-                X_train, y_train, X_test, y_test, 
-                use_gpu=True, best_params=best_params_gpu, gpu_available=gpu_available
+                X_train,
+                y_train,
+                X_test,
+                y_test,
+                use_gpu=True,
+                best_params=best_params_gpu,
+                gpu_available=gpu_available,
             )
         except Exception as e:
             print(f"GPU training failed: {e}")
@@ -393,38 +407,43 @@ def main():
 
     print("\n--- Training with CPU using tuned parameters ---")
     model_cpu, time_cpu, cpu_actually_used = train_model_with_gpu(
-        X_train, y_train, X_test, y_test, 
-        use_gpu=False, best_params=best_params_cpu, gpu_available=gpu_available
+        X_train,
+        y_train,
+        X_test,
+        y_test,
+        use_gpu=False,
+        best_params=best_params_cpu,
+        gpu_available=gpu_available,
     )
 
     # Print performance comparison
-    print("\n" + "="*50)
+    print("\n" + "=" * 50)
     print("PERFORMANCE COMPARISON")
-    print("="*50)
-    
+    print("=" * 50)
+
     if gpu_actually_used and model_gpu is not None:
         speedup = time_cpu / time_gpu
         print(f"GPU training time: {time_gpu:.2f} seconds")
         print(f"CPU training time: {time_cpu:.2f} seconds")
         print(f"GPU training was {speedup:.2f}x faster than CPU training")
-        
+
         # Plot feature importance for both models
         plot_feature_importance(model_gpu, feature_columns, "GPU Model")
         plot_feature_importance(model_cpu, feature_columns, "CPU Model")
-        
+
         # Save the GPU model
         model_gpu.save_model("stock_prediction_model_gpu.json")
         print("GPU model saved as 'stock_prediction_model_gpu.json'")
-        
+
         # Save best GPU parameters
         with open("best_params_gpu.txt", "w") as f:
             f.write(str(best_params_gpu))
         print("Best GPU parameters saved to 'best_params_gpu.txt'")
-        
+
     else:
         print(f"CPU training time: {time_cpu:.2f} seconds")
         print("GPU training was not available or failed")
-        
+
         # Plot feature importance for CPU model only
         plot_feature_importance(model_cpu, feature_columns, "CPU Model")
 
@@ -436,18 +455,20 @@ def main():
     with open("best_params_cpu.txt", "w") as f:
         f.write(str(best_params_cpu))
     print("Best CPU parameters saved to 'best_params_cpu.txt'")
-    
-    print("\n" + "="*50)
+
+    print("\n" + "=" * 50)
     print("SUMMARY")
-    print("="*50)
+    print("=" * 50)
     print(f"GPU Available: {gpu_available}")
     print(f"GPU Actually Used for Training: {gpu_actually_used}")
     print(f"CPU Training Completed: {cpu_actually_used}")
-    
+
     if gpu_actually_used and cpu_actually_used:
         print(f"Performance Improvement: {speedup:.2f}x speedup with GPU")
     else:
-        print("Performance comparison not available (GPU training failed or not available)")
+        print(
+            "Performance comparison not available (GPU training failed or not available)"
+        )
 
 
 if __name__ == "__main__":
